@@ -10,10 +10,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
- 
       - name: Checkout repository
         uses: actions/checkout@v3
-
 
       - name: Setup Quarto
         uses: quarto-dev/quarto-actions/setup@v2
@@ -30,5 +28,5 @@ jobs:
         uses: ad-m/github-push-action@v0.6.0
         with:
           branch: gh-pages
-          folder: _book
-          github_token: ${{ secrets.GH_PAT }}
+          directory: _book
+          github_token: ${{ secrets.GITHUB_TOKEN }}
