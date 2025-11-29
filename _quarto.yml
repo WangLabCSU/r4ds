@@ -18,6 +18,25 @@ book:
     - chapters/ch8_workflow_getting_help.qmd
     - chapters/ch9_layers.qmd
     - chapters/ch10_exploratory_data_analysis.qmd
+    - chapters/ch11_communication.qmd
+    - chapters/ch12_logical_vectors.qmd
+    - chapters/ch13_numbers.qmd
+    - chapters/ch14_strings.qmd
+    - chapters/ch15_regular_expressions.qmd
+    - chapters/ch16_factors.qmd
+    - chapters/ch17_dates_and_times.qmd
+    - chapters/ch18_missing_values.qmd
+    - chapters/ch19_joins.qmd
+    - chapters/ch20_spreadsheets.qmd
+    - chapters/ch21_databases.qmd
+    - chapters/ch22_arrow.qmd
+    - chapters/ch23_hierarchical_data.qmd
+    - chapters/ch24_web_scraping.qmd
+    - chapters/ch25_functions.qmd
+    - chapters/ch26_iteration.qmd
+    - chapters/ch27_field_guide_base_R.qmd
+    - chapters/ch28_quarto.qmd
+    - chapters/ch29_quarto_formats.qmd
     - references.qmd
 
 bibliography: references.bib
@@ -30,6 +49,15 @@ format:
     theme:
       - cosmo
       - brand
+    toc: true
+    toc-depth: 2
+    navbar:
+      right:
+        - text: "Source Code"
+          href: "https://github.com/SunPast/r4ds"
+          icon: "fab fa-github"
+        - text: "Toggle Reader Mode"
+          type: toggle-reader
 
 editor: visual
 
