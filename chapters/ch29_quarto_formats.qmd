@@ -1,0 +1,226 @@
+---
+title: "Quarto Formats"
+format: html
+---
+
+## 引言
+
+上节提到 Quarto 可用来生成 HTML 文档。本章将简要介绍用 Quarto 输出其他类型的文件。
+
+设置文档输出的方式有两种：
+
+- 修改 YAML 头部：
+
+```
+title: "Diamond sizes"
+format: html
+```
+
+- 手动调用 `quarto::quarto_render()`：
+
+```R
+quarto::quarto_render("diamond-sizes.qmd", output_format = "docx")
+```
+
+> `output_format` 参数可以接受一个值列表，故而能同时输出多种类型文件：
+>
+> ```R
+> quarto::quarto_render("diamond-sizes.qmd", output_format = c("docx", "pdf"))
+> ```
+
+
+
+## 输出选项
+
+Quarto 给输出文件提供了多种选项。以下网址集合全部可选选项：https://quarto.org/docs/output-formats/all-formats.html。
+
+要修改默认选项，需使用**扩展格式字段**。例如，如果想渲染一个带浮动目录的 HTML，可以这样写：
+
+```
+format:
+  html:
+    toc: true
+    toc_float: true
+```
+
+还可以通过提供格式列表来渲染成多个输出：
+
+```
+format:
+  html:
+    toc: true
+    toc_float: true
+  pdf: default
+  docx: default
+```
+
+>  `pdf: default`表示不修改任何默认选项
+
+
+
+
+
+## 文档
+
+除了HTML，Quarto还可以生成其他类型的文档。
+
+- `pdf`：通过 LaTeX（一个开源文档排版系统）生成 PDF。
+- `docx`：生成 Microsoft Word（.docx）文档。
+- `odt`：生成 OpenDocument Text（.odt）文档。
+- `rtf`：生成富文本格式（.rtf）文档。
+- `gfm`：生成 GitHub 风格的 Markdown（.md）文档。
+- `ipynb`：生成 Jupyter Notebook（.ipynb）。
+
+在生成共享文档时，应隐藏源代码，仅保留执行结果。可在文档 YAML 中更改全局选项：
+
+```
+execute:
+  echo: false
+```
+
+
+
+
+
+## 演示文稿
+
+ Quarto 还能用来制作演示文稿。虽然它在视觉控制方面不如 Keynote 或 PowerPoint 灵活，但能自动插入 R 代码的结果，节省大量时间。
+
+演示文稿的工作方式是将内容分割成幻灯片，每遇到一个二级标题（`##`）时，就会开始一个新的幻灯片。而一级标题（`#`）表示一个新章节的开始，会生成一个章节标题幻灯片，且默认在页面居中。
+
+Quarto 支持多种演示文稿格式，包括：
+
+- `revealjs` —— 使用 revealjs 制作的 HTML 演示文稿
+- `pptx` —— PowerPoint 演示文稿
+- `beamer` —— 使用 LaTeX Beamer 制作的 PDF 演示文稿
+
+
+
+
+
+## 交互性
+
+使用 Quarto 创建的 HTML 文档也可以包含交互组件。下面介绍两种在 Quarto 文档中加入交互的方式：**htmlwidgets** 和 **Shiny**。
+
+------
+
+### htmlwidgets
+
+HTML本身就是交互式格式，而通过htmlwidgets（一种能生成交互式HTML可视化的R函数包）可以充分利用这一特性。例如下面这串代码生成一个leaflet交互式地图，但只能在网页端查看并操作。
+
+```R
+library(leaflet)
+leaflet() |>
+  setView(174.764, -36.877, zoom = 16) |> 
+  addTiles() |>
+  addMarkers(174.764, -36.877, popup = "Maungawhau") 
+```
+
+有很多 R 包都可以提供 htmlwidgets，包括：
+
+- **dygraphs** —— 交互式时间序列可视化
+- **DT** —— 交互式表格
+- **threejs** —— 交互式 3D 图形
+- **DiagrammeR** —— 图表（如流程图、简单的节点-链接图）
+
+------
+
+### Shiny
+
+htmlwidgets 所有交互都发生在浏览器中，与 R 无关。而 **Shiny** 与之相对，是一个能让我们用 R 代码创建交互的包。
+
+要在 Quarto 文档中调用 Shiny 代码，可以在 YAML 头部添加：
+
+```
+title: "Shiny Web App"
+format: html
+server: shiny
+```
+
+然后，使用**输入函数**向文档添加交互组件：
+
+```
+library(shiny)
+
+textInput("name", "What is your name?")
+numericInput("age", "How old are you?", NA, min = 0, max = 150)
+```
+
+这些代码会生成两个输入框：
+
+![](https://r4ds.hadley.nz/quarto/quarto-shiny.png)
+
+可以用 `input$name` 和 `input$age` 引用输入值，当输入值更改时相关代码也会自动更新。
+
+Shiny 的交互发生在**服务器端**，故而相关应用需要 Shiny 服务器才能在线运行。
+
+想进一步学习 Shiny，推荐阅读 [《Mastering Shiny》](https://mastering-shiny.org "《Mastering Shiny》")。
+
+
+
+
+
+## 网站与图书
+
+通过简单配置，Quarto 可生成完整网站或图书：
+
+1. 将所有 `.qmd` 文件置于同一目录，`index.qmd` 会自动成为首页
+2. 创建 `_quarto.yml` 文件并指定项目类型为`website`或`book`。
+
+网站示例：
+
+```
+project:
+  type: website
+
+website:
+  title: "A website on color scales"
+  navbar:
+    left:
+      - href: index.qmd
+        text: Home
+      - href: viridis-colors.qmd
+        text: Viridis colors
+      - href: terrain-colors.qmd
+        text: Terrain colors
+```
+
+图书示例：
+
+```
+project:
+  type: book
+
+book:
+  title: "A book on color scales"
+  author: "Jane Coloriste"
+  chapters:
+    - index.qmd
+    - intro.qmd
+    - viridis-colors.qmd
+    - terrain-colors.qmd
+
+format:
+  html:
+    theme: cosmo
+  pdf: default
+  epub: default
+```
+
+> 参考链接：
+>
+> - [Quarto 网站开发](https://quarto.org/docs/websites "Quarto 网站开发")
+> - [Quarto 图书制作](https://quarto.org/docs/books "Quarto 图书制作")
+
+
+
+
+
+## 其他输出格式
+
+Quarto 还能以各种格式输出，以下再列两例：
+
+- 参考[模板库](https://quarto.org/docs/journals/templates.html "模板库")，输出期刊文章。
+- 使用`format: ipynb`输出 Jupyter Notebook。
+
+参考[Quarto格式集合网站](https://quarto.org/docs/output-formats/all-formats.html "Quarto格式集合网站")可了解更多输出格式。

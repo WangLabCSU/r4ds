@@ -1,0 +1,360 @@
+---
+title: "日期与时间"
+format: html
+---
+
+## 引言
+
+本章介绍如何在 R 中处理日期与时间。
+
+日期和时间的处理会随着学习深入变得越发困难，因为它们需要协调众多地缘因素，包括月份划分、时区与夏令时等。本章将从如何从不同输入中创建日期时间对象开始，然后介绍如何从中提取年份、月份、日等组成部分。接着会进入更复杂的时间跨度处理，讨论根据具体分析目的不同而产生的多种时间跨度类型。最后简要介绍时区所带来的附加挑战。
+
+本章使用 **lubridate** 包，它简化了 R 中日期与时间的操作。练习数据则依然来自 **nycflights13** 数据集：
+
+```R
+library(tidyverse)
+library(nycflights13)
+```
+
+
+
+
+
+## 创建日期/时间
+
+在 R 中，有三种用于表示“某一时刻”的日期/时间类型：
+
+- 日期（Date）：仅包含年/月/日。Tibble 中显示为 `<date>`。
+- 时间（Time）：仅包含小时/分钟/秒。Tibble 中显示为 `<time>`。
+- 日期时间（Date-time）：包含日期和时间，唯一标识某一具体时刻（通常精确到秒）。Tibble 中显示为 `<dttm>`。在 base R 中，它被称作 `POSIXct`。
+
+注意，理论上应该始终使用**最简单的数据类型**来满足需求。也就是说，如果只需要日期，就不使用日期时间，因为日期时间涉及时区处理，复杂度更高。
+
+获取当前日期或当前日期时间：
+
+```R
+today()
+#> [1] "2025-07-19"
+now()
+#> [1] "2025-07-19 23:09:25 UTC"
+```
+
+创建日期时间的四种主要方式如下：
+
+1. 通过 `readr` 读取文件时自动解析。如果 CSV 中包含 ISO8601 格式的日期或日期时间，`readr` 会自动识别：
+
+```R
+csv <- "
+  date,datetime
+  2022-01-02,2022-01-02 05:12
+"
+
+read_csv(csv)
+```
+
+输出如下：
+
+```R
+# A tibble: 1 × 2
+  date       datetime           
+  <date>     <dttm>             
+1 2022-01-02 2022-01-02 05:12:00
+```
+
+>  **ISO8601** 是一种国际标准，日期为`年-月-日`，时间为`时:分:秒`，日期和时间之间用空格或 `T` 分隔。
+
+对于非标准格式，则需要用 `col_types` 指定解析规则，例如：
+
+```R
+read_csv(csv, col_types = cols(date = col_date("%m/%d/%y")))
+```
+
+`readr` 支持的格式代码如下：
+
+| 类型 | 代码 |       含义       |       示例       |
+| :--: | :--: | :--------------: | :--------------: |
+|  年  |  %Y  |    四位数年份    |       2021       |
+|      |  %y  |    两位数年份    |        21        |
+|  月  |  %m  |     数字月份     |        2         |
+|      |  %b  |  缩写英文月份名  |       Feb        |
+|      |  %B  |  全称英文月份名  |     February     |
+|  日  |  %d  |   日（01–31）    |        02        |
+|      |  %e  |    不补零的日    |        2         |
+| 时间 |  %H  | 小时（24小时制） |        13        |
+|      |  %I  | 小时（12小时制） |        1         |
+|      |  %p  |     AM 或 PM     |        pm        |
+|      |  %M  |       分钟       |        35        |
+|      |  %S  |        秒        |        45        |
+| 时区 |  %Z  |      时区名      | America/New_York |
+|      |  %z  |     UTC 偏移     |      +0800       |
+
+2. 从字符串中解析。`lubridate` 包提供了简洁的函数，根据年/月/日的顺序命名：
+
+```R
+ymd("2017-01-31")          # 年月日
+mdy("January 31st, 2017")  # 月日年
+dmy("31-Jan-2017")         # 日月年
+```
+
+要创建日期时间，用下划线分割，加上 `_h`, `_hm`, `_hms` 等后缀：
+
+```R
+ymd_hms("2017-01-31 20:11:59")
+mdy_hm("01/31/2017 08:01")
+```
+
+指定时区则要用到`tz`参数：
+
+```R
+ymd("2017-01-31", tz = "UTC")
+```
+
+
+
+3. 从单独的日期/时间组件拼接。有时日期和时间分散在多个列中，比如 `flights` 数据集：
+
+```R
+flights |> 
+  select(year, month, day, hour, minute)
+```
+
+使用 `make_date()`（生成日期）或 `make_datetime()`（生成日期时间）：
+
+```R
+flights |> 
+  mutate(departure = make_datetime(year, month, day, hour, minute))
+```
+
+对于 `flights` 数据中格式为 `hhmm` 的时间，需要使用取整与模运算提取小时和分钟：
+
+```R
+make_datetime_100 <- function(year, month, day, time) {
+  make_datetime(year, month, day, time %/% 100, time %% 100)
+}
+```
+
+
+
+4. 从已有日期/时间对象转换。比如在 `date-time` 与 `date` 之间转换：
+
+```R
+as_datetime(today())  # 将 date 转为 date-time
+as_date(now())        # 将 date-time 转为 date
+```
+
+## 日期时间组件
+
+本节主要介绍一组用于**获取和设置日期时间各个组成部分**的访问函数（accessor functions）。
+
+
+
+可以使用以下访问函数来提取日期的单独组成部分：
+
+- `year()`: 提取年份
+- `month()`: 提取月份
+- `mday()`: 提取月份中的第几天
+- `yday()`: 提取一年中的第几天
+- `wday()`: 提取一周中的第几天
+- `hour()`, `minute()`, `second()`: 提取时间中的小时、分钟、秒
+
+这些函数本质上可以看作是 `make_datetime()` 函数的“逆操作”。
+
+```R
+datetime <- ymd_hms("2026-07-08 12:34:56")
+
+year(datetime)     # 2026
+month(datetime)    # 7
+mday(datetime)     # 8
+yday(datetime)     # 189 （2026年的第189天）
+wday(datetime)     # 4   （默认星期天是1，这天是星期三）
+```
+
+对于 `month()` 和 `wday()`，可以设置 `label = TRUE` 来显示月份或星期的英文缩写标签。要想显示完整名称，可以再加上 `abbr = FALSE`：
+
+```R
+month(datetime, label = TRUE)
+#> [1] Jul
+#> 12 Levels: Jan < Feb < Mar < Apr < May < Jun < Jul < ... < Dec
+
+wday(datetime, label = TRUE, abbr = FALSE)
+#> [1] Wednesday
+#> 7 Levels: Sunday < Monday < Tuesday < Wednesday < Thursday < Friday < Saturday
+```
+
+比如我们可以使用 `wday()` 来分析航班在一周内的分布情况：
+
+```R
+flights_dt |> 
+  mutate(wday = wday(dep_time, label = TRUE)) |> 
+  ggplot(aes(x = wday)) +
+  geom_bar()
+```
+
+![](https://r4ds.hadley.nz/datetimes_files/figure-html/unnamed-chunk-20-1.png)
+
+------
+
+另一种分析时间的方式是将日期“对齐”到指定的时间单位，注意单位（second、minute、hour、day、week等）要打引号。可以使用以下函数：
+
+- `floor_date()`：向下取整
+- `ceiling_date()`：向上取整
+- `round_date()`：标准四舍五入
+
+假设某个 `time` 是 `2025-07-10 14:32:00`，那么 ：
+
+```R
+floor_date(time, "week")
+[1] "2025-07-07 00:00:00"
+ceiling_date(time,"month")
+[1] "2025-08-01 UTC"
+round_date(time,"year")
+[1] "2026-01-01 UTC"
+```
+
+------
+
+除了提取日期时间的组成部分，也可以对其进行修改，通常用于数据清洗。
+
+```R
+datetime <- ymd_hms("2026-07-08 12:34:56")
+#> [1] "2026-07-08 12:34:56 UTC"
+
+year(datetime) <- 2030
+#> [1] "2030-07-08 12:34:56 UTC"
+
+month(datetime) <- 1
+#> [1] "2030-01-08 12:34:56 UTC"
+
+hour(datetime) <- hour(datetime) + 1
+#> [1] "2030-01-08 13:34:56 UTC"
+```
+
+也可以用 `update()` 一次修改多个组成部分：
+
+```R
+update(datetime, year = 2030, month = 2, mday = 2, hour = 2)
+#> [1] "2030-02-02 02:34:56 UTC"
+```
+
+注意，数值超过极限值会自动进位：
+
+```R
+update(ymd("2023-02-01"), mday = 30)
+#> [1] "2023-03-02"
+```
+
+
+
+
+
+
+
+## 时间跨度
+
+本节学习日期之间的算术运算，包括减法、加法和除法。过程中会涉及三种重要的时间跨度类型：
+
+1. **Duration（持续时间）**：表示精确的秒数。
+2. **Period（周期）**：表示更贴近日常的单位，例如“几个月”或“几周”。
+3. **Interval（区间）**：表示一个明确的起点和终点。
+
+>- 只关心实际经过了多少时间用 `duration`。
+>- 想表达“加一个月”、“加三年”用 `period`。
+>- 想知道“某个事件持续了多少天”用 `interval`。
+
+------
+
+在 R 中对两个日期做减法，得到的是一个 `difftime` 对象：
+
+```R
+h_age <- today() - ymd("1979-10-14")
+h_age
+#> Time difference of 16719 days
+```
+
+`difftime` 类可以用秒、分钟、小时、天等为单位，但由于单位不固定，操作起来可能不太方便。
+
+lubridate 包提供了更稳定的 `duration` 类型，始终以秒为单位：
+
+```R
+as.duration(h_age)
+#> [1] "1444521600s (~45.77 years)"
+```
+
+常用的duration类构造函数如下：
+
+```R
+dseconds(15)      # [1] "15s"
+dminutes(10)      # [1] "600s (~10 minutes)"
+dhours(24)        # [1] "86400s (~1 days)"
+ddays(5)          # [1] "432000s (~5 days)"
+dweeks(3)         # [1] "1814400s (~3 weeks)"
+dyears(1)         # [1] "31557600s (~1 years)"
+```
+
+注意，`duration` 使用平均年长度（365.25 天）来计算年数。月份无法精确表示为 duration，因为月份天数不固定。
+
+运算示例：
+
+```R
+2 * dyears(1)   # 两年
+dyears(1) + dweeks(12) + dhours(15)
+```
+
+也可以和日期相加减：
+
+```R
+tomorrow <- today() + ddays(1)
+last_year <- today() - dyears(1)
+```
+
+------
+
+为了解决闰年等问题，lubridate 提供了 `periods` 类型。它不使用精确秒数，而是保留日常语义（如“加一天”、“加一个月”）。构造函数与duration类似但结果不只以秒表示：
+
+```R
+hours(24)     # [1] "24H 0M 0S"
+days(7)       # [1] "7d 0H 0M 0S"
+months(1)     # [1] "1m 0d 0H 0M 0S"
+```
+
+运算示例：
+
+```R
+10 * (months(6) + days(1))       # 60个月 + 10天
+```
+
+------
+
+若想知道某区间内共有多少天，用时间区间 `interval` 更合适。
+
+创建 interval采用`start %--% end`，`start`是起始时间，`end`是终末时间。
+
+```R
+y2023 <- ymd("2023-01-01") %--% ymd("2024-01-01")
+y2023 / days(1)  # 365 天
+
+y2024 <- ymd("2024-01-01") %--% ymd("2025-01-01")
+y2024 / days(1)  # 366 天（闰年）
+```
+
+
+
+
+
+## 时区
+
+对于时区，R 使用国际标准 —— IANA 时区数据库。此标准采用统一的命名规则：`{地区}/{地点}`，通常是 `{洲名}/{城市名}` 或 `{大洋}/{城市名}` 的格式。比如：
+
+- `"America/New_York"`（美洲/纽约）
+- `"Europe/Paris"`（欧洲/巴黎）
+- `"Pacific/Auckland"`（太平洋/奥克兰）
+
+可以通过 `Sys.timezone()` 查看 R 所识别的当前时区：
+
+```R
+Sys.timezone()
+#> [1] "Asia/Shanghai"
+```
+
+在 R 中，时区是日期时间对象的一个属性，它只影响时间的显示方式，并不改变代表的真实时间点。
+

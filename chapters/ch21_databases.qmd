@@ -1,0 +1,728 @@
+---
+title: "数据库"
+format: html
+---
+
+## 引言
+
+数据主要存储在数据库中，因此掌握直接查询的方法很关键。偶尔请人导出一份数据快照或许可行，但很快就会变得麻烦，因为每个微小的调整都需要重新沟通和协调。
+
+本章将介绍 `DBI` 与 `dbplyr`。`DBI` 是一个低层接口，用于连接数据库并执行 SQL 语句；`dbplyr` 则是一个高层接口，可将 `dplyr` 代码翻译成 SQL 查询，并借助 `DBI` 执行这些查询。
+
+```R
+library(DBI)
+library(dbplyr)
+library(tidyverse)
+```
+
+
+
+## 数据库基础
+
+从最简单的层面来看，可以将数据库视为一组数据框的集合，在数据库术语中称为“表格（tables）”。与数据框类似，数据库表也是一组具名列的集合，其每一列中所有值的类型相同。
+
+数据库表与数据框之间存在三个关键区别：
+
+- 数据库表存储在磁盘上，可以无限大；而数据框存储在内存中，其大小受内存限制。
+- 数据库表几乎都有索引，能快速定位某行，而无需遍历整个表；数据框和 tibble 没有索引机制。
+- 传统数据库通常针对数据写入的速度进行优化，从而按行存储数据，被称为“面向行（row-oriented）”；而 R 数据框是按列存储的。
+
+数据库由“数据库管理系统”（Database Management Systems，简称 **DBMS**）管理。DBMS 大致可以分为三类：
+
+- 客户端-服务器型（Client-server DBMS）：运行在功能强大的中央服务器上，用户通过本地计算机（客户端）进行连接。适合在组织中多人共享数据。常见的有 PostgreSQL、MariaDB、SQL Server 和 Oracle。
+- 云数据库（Cloud DBMS）：例如 Snowflake、Amazon RedShift 和 Google BigQuery，与客户端-服务器型类似，但运行在云端。这类系统可轻松处理超大规模数据集，并能根据需要自动扩展计算资源。
+- 本地进程内数据库（In-process DBMS）：如 SQLite 和 duckdb，完全在本地计算机上运行。适合个人用户处理大型数据集。
+
+
+
+
+
+## 连接到数据库
+
+要在 R 中连接数据库，需要使用一对有配套效果的包，分别的作用如下：
+
+- `DBI`包（**d**ata**b**ase **i**nterface，数据库接口），可提供一组通用函数，用于连接数据库、上传数据、执行 SQL 查询等。
+- 专门针对目标 DBMS ，将 DBI 的通用命令翻译为特定数据库系统所需的具体操作。通常每种数据库系统都有一个对应的包，例如 `RPostgres` 用于 PostgreSQL，`RMariaDB` 用于 MySQL。
+
+具体而言，首先用 `DBI::dbConnect()` 创建一个数据库连接。第一个参数用于指定 DBMS，后续参数则提供数据库的连接信息（比如服务器地址和访问凭证）。以下是几个典型例子：
+
+```R
+con <- DBI::dbConnect(
+  RMariaDB::MariaDB(), 
+  username = "foo"
+)
+
+con <- DBI::dbConnect(
+  RPostgres::Postgres(), 
+  hostname = "databases.mycompany.com", 
+  port = 1234
+)
+```
+
+不同数据库系统的连接细节差异很大，初次设置时可能需要反复尝试，但通常只需配置一次即可。
+
+本书使用一种完全基于 R 包的进程内数据库`duckdb`。
+
+连接 `duckdb` 特别简单，默认创建一个临时数据库，R 会话结束时自动删除。所以每次重新启动 R，都是一个干净的环境：
+
+```R
+con <- DBI::dbConnect(duckdb::duckdb())
+```
+
+`duckdb` 是一个高性能数据库，专门为数据科学家的需求而设计，也非常容易上手。如果要将它用于实际项目，还需要指定 `dbdir` 参数，用于创建**持久化数据库**并告知保存位置。如果创建的是 RStudio 项目，就可以把它保存在项目目录下的 `duckdb` 文件夹中：
+
+```R
+con <- DBI::dbConnect(duckdb::duckdb(), dbdir = "duckdb")
+```
+
+由于连接的是一个全新的数据库，所以接下来要加载一些数据。
+
+下面举例，用 `DBI::dbWriteTable()` 将 `ggplot2` 包中的 `mpg` 和 `diamonds` 数据集载入数据库。`dbWriteTable()` 的最简用法需要三个参数：数据库连接、要创建的表名、一个数据框：
+
+```R
+dbWriteTable(con, "mpg", ggplot2::mpg)
+dbWriteTable(con, "diamonds", ggplot2::diamonds)
+```
+
+> 如果在实际项目中使用 `duckdb`，强烈建议学习 `duckdb_read_csv()` 和 `duckdb_register_arrow()`。这些函数提供了更强大、高效的方式，可以直接从磁盘加载数据进入数据库，无需先导入 R 内存中。
+
+载入后，可以使用一些 DBI 提供的函数，检查数据是否加载成功：
+
+- `dbListTables()`：列出数据库中的所有表。
+- `dbReadTable()`：读取数据库中某张表的全部内容。
+
+示例：
+
+```R
+dbListTables(con)
+#> [1] "diamonds" "mpg"
+
+con |> 
+  dbReadTable("diamonds") |> 
+  as_tibble()
+# A tibble: 53,940 × 10
+   carat cut       color clarity depth table price     x     y     z
+   <dbl> <fct>     <fct> <fct>   <dbl> <dbl> <int> <dbl> <dbl> <dbl>
+ 1  0.23 Ideal     E     SI2      61.5    55   326  3.95  3.98  2.43
+ 2  0.21 Premium   E     SI1      59.8    61   326  3.89  3.84  2.31
+ ...
+```
+
+`dbReadTable()` 返回的是 `data.frame`，我们使用 `as_tibble()` 转换为 tibble，让输出效果更优雅。
+
+
+
+
+
+## dbplyr 基础
+
+`dbplyr` 是 `dplyr` 的后端实现，会将操作翻译为 SQL，这意味着虽然我们编写的是 `dplyr` 代码，但其执行方式有些不同。除了 `dbplyr` 外还有其他后端，包括将代码翻译为 `data.table` 的 `dtplyr`，以及在多个核心上并行执行代码的 `multidplyr`。
+
+要使用 `dbplyr`，首先需要用 `tbl()` 函数创建一个代表数据库中某张表的对象：
+
+```R
+diamonds_db <- tbl(con, "diamonds")
+```
+
+这个对象是**惰性**的，当对其使用 `dplyr` 动词（如 `filter()`、`select()` 等）时，`dplyr` 实际上并不会立即执行任何操作，只是记录下我们想执行的一系列操作，直到真正需要结果时才会执行。比如，下面这个数据处理流程：
+
+```R
+big_diamonds_db <- diamonds_db |> 
+  filter(price > 15000) |> 
+  select(carat:clarity, price)
+```
+
+然后查看这个对象：
+
+```R
+big_diamonds_db #此时才执行
+#> # Source:   SQL [?? x 5]
+#> # Database: DuckDB v1.3.2 [unknown@Linux 6.11.0-1018-azure:R 4.5.1/:memory:]
+#>   carat cut       color clarity price
+#>   <dbl> <fct>     <fct> <fct>   <int>
+#> 1  1.54 Premium   E     VS2     15002
+#> 2  1.19 Ideal     F     VVS1    15005
+#> 3  2.1  Premium   I     SI1     15007
+#> 4  1.69 Ideal     D     SI1     15011
+#> 5  1.5  Very Good G     VVS2    15013
+#> 6  1.73 Very Good G     VS1     15014
+#> # ℹ more rows
+```
+
+可以通过上面输出顶部的信息看出该对象表示的是一个数据库查询，比如它显示了使用的数据库系统名称，并显示了列数，但行数通常不确定，因为获取行数需要完整执行整个查询。
+
+对这个惰性对象使用 `show_query()` 可以查看由 `dplyr` 操作生成的 SQL 语句。可以写一些 `dplyr` 代码，让 `dbplyr` 把它翻译成 SQL，从而很便于理解两种语言是如何一一对应的。比如：
+
+```R
+big_diamonds_db |> 
+  show_query()
+#> <SQL>
+#> SELECT carat, cut, color, clarity, price
+#> FROM diamonds
+#> WHERE (price > 15000.0)
+```
+
+要将查询结果真正取回到 R 中使用，可以调用 `collect()`函数，幕后同样会生成 SQL 查询。
+
+```R
+big_diamonds <- big_diamonds_db |> 
+  collect()
+
+big_diamonds
+#> # A tibble: 1,655 × 5
+#>   carat cut       color clarity price
+#>   <dbl> <fct>     <fct> <fct>   <int>
+#> 1  1.54 Premium   E     VS2     15002
+#> 2  1.19 Ideal     F     VVS1    15005
+#> 3  2.1  Premium   I     SI1     15007
+#> 4  1.69 Ideal     D     SI1     15011
+#> 5  1.5  Very Good G     VVS2    15013
+#> 6  1.73 Very Good G     VS1     15014
+#> # ℹ 1,649 more rows
+```
+
+总结以上流程：
+
+1. 使用 `dbplyr` 从数据库中筛选需要的数据，使用 `dplyr` 提供的动词进行基本的筛选和聚合。
+2. 调用 `collect()` 将数据收集到 R 内存中（比如一个 tibble），然后便可用 R 分析数据。
+
+
+
+
+
+## SQL
+
+本节通过 dbplyr 的视角讲述 SQL相关知识。
+
+下面的例子依旧使用 `nycflights13` 包中的两个老朋友 —— `flights` 和 `planes` ，探讨 `dplyr` 和 SQL 之间的关系。
+
+```R
+dbplyr::copy_nycflights13(con) # 这是一个专门函数，将 nycflights13 中的表复制到数据库
+#> Creating table: airlines
+#> Creating table: airports
+#> Creating table: flights
+#> Creating table: planes
+#> Creating table: weather
+flights <- tbl(con, "flights")
+planes <- tbl(con, "planes")
+```
+
+------
+
+### 基础
+
+SQL 的顶层组成部分称为 **语句（statements）**。常见的语句包括 `CREATE`（定义新表）、`INSERT`（添加数据）和 `SELECT`（检索数据）。作为数据科学学习者，我们将专注于 `SELECT` 语句，亦称作**查询（queries）**，今后几乎只会使用这一个语句。
+
+一个查询由多个 **子句（clauses）** 构成。最重要的五个子句是：`SELECT`、`FROM`、`WHERE`、`ORDER BY` 和 `GROUP BY`。每个查询必须包含 `SELECT` 和 `FROM` 子句，故最简单的查询语句是：
+
+```sql
+SELECT * FROM table #从指定表中选择所有列
+```
+
+这也是`dbplyr `给未加工表生成的 SQL语句：
+
+```R
+flights |> show_query()
+#> <SQL>
+#> SELECT *
+#> FROM flights
+
+planes |> show_query()
+#> <SQL>
+#> SELECT *
+#> FROM planes
+```
+
+`WHERE` 和 `ORDER BY` 分别用于指定包含哪些行，以及行的排序方式：
+
+```R
+flights |> 
+  filter(dest == "IAH") |> 
+  arrange(dep_delay) |>
+  show_query()
+#> <SQL>
+#> SELECT flights.*
+#> FROM flights
+#> WHERE (dest = 'IAH')
+#> ORDER BY dep_delay
+```
+
+`GROUP BY` 将查询转换为汇总，触发**聚合**操作：
+
+```R
+flights |> 
+  group_by(dest) |> 
+  summarize(dep_delay = mean(dep_delay, na.rm = TRUE)) |> 
+  show_query()
+#> <SQL>
+#> SELECT dest, AVG(dep_delay) AS dep_delay
+#> FROM flights
+#> GROUP BY dest
+```
+
+`dplyr` 动词与 `SELECT` 子句之间有两个重要区别：
+
+1. 在 SQL 中，大小写**不敏感**：你可以写 `select`、`SELECT`，甚至是 `SeLeCt`。本书则遵循通用约定，将 SQL 关键字用大写表示，以便于区分表名或变量名。
+2. 在 SQL 中，顺序很重要：子句的顺序必须是 `SELECT`、`FROM`、`WHERE`、`GROUP BY`、`ORDER BY`。不过实际的执行顺序是 `FROM` → `WHERE` → `GROUP BY` → `SELECT` → `ORDER BY`。
+
+接下来的小节将更详细地探讨每个子句。
+
+------
+
+### SELECT
+
+`SELECT` 子句是查询的核心，对应的 `dplyr` 函数有：`select()`、`mutate()`、`rename()`、`relocate()`、 `summarize()`。
+
+`select()`、`rename()` 和 `relocate()` 翻译成 `SELECT` 的方式非常直接，仅影响列的名称、位置：
+
+```R
+planes |> 
+  select(tailnum, type, manufacturer, model, year) |> 
+  show_query()
+#> <SQL>
+#> SELECT tailnum, "type", manufacturer, model, "year"
+#> FROM planes
+
+planes |> 
+  select(tailnum, type, manufacturer, model, year) |> 
+  rename(year_built = year) |> 
+  show_query()
+#> <SQL>
+#> SELECT tailnum, "type", manufacturer, model, "year" AS year_built
+#> FROM planes
+
+planes |> 
+  select(tailnum, type, manufacturer, model, year) |> 
+  relocate(manufacturer, model, .before = type) |> 
+  show_query()
+#> <SQL>
+#> SELECT tailnum, manufacturer, model, "type", "year"
+#> FROM planes
+```
+
+这个示例也展示了 SQL 如何进行重命名。SQL 中这种重命名被称为 **别名（aliasing）**，使用 `AS` 实现。注意与 `mutate()` 相反，旧名称在左，新名称在右。
+
+上面的示例中，`"year"` 和 `"type"` 被双引号包裹，是因为这些是 duckdb 中的**保留字**，所以 `dbplyr` 使用引号避免与 SQL 操作符混淆。
+
+> **保留字**（Reserved words），也叫关键词（keywords），是指在编程语言或数据库语言（如SQL）中已经被赋予特定意义、不能用作变量名、表名、字段名等标识符的词语。
+
+对 `mutate()` 的翻译同样很直接，每个变量变成 `SELECT` 中的一个新表达式：
+
+```R
+flights |> 
+  mutate(
+    speed = distance / (air_time / 60)
+  ) |> 
+  show_query()
+#> <SQL>
+#> SELECT flights.*, distance / (air_time / 60.0) AS speed
+#> FROM flights
+```
+
+------
+
+### FROM 子句
+
+`FROM` 子句定义了数据来源。
+
+当前阶段这部分内容无需深入，因为目前只使用单个表。但在后续学习连接函数时，会遇到更复杂的例子。
+
+------
+
+##### 21.5.4 GROUP BY 子句
+
+`group_by()` 被翻译为 `GROUP BY` 子句，而 `summarize()` 则被翻译为 `SELECT` 子句：
+
+```R
+diamonds_db |> 
+  group_by(cut) |> 
+  summarize(
+    n = n(),
+    avg_price = mean(price, na.rm = TRUE)
+  ) |> 
+  show_query()
+```
+
+输出 SQL：
+
+```sql
+SELECT cut, COUNT(*) AS n, AVG(price) AS avg_price
+FROM diamonds
+GROUP BY cut
+```
+
+------
+
+### WHERE 子句
+
+`filter()` 被翻译为 `WHERE` 子句。比如：
+
+```R
+flights |> 
+  filter(dest == "IAH" | dest == "HOU") |> 
+  show_query()
+#> <SQL>
+#> SELECT flights.*
+#> FROM flights
+#> WHERE (dest = 'IAH' OR dest = 'HOU')
+
+flights |> 
+  filter(arr_delay > 0 & arr_delay < 20) |> 
+  show_query()
+#> <SQL>
+#> SELECT flights.*
+#> FROM flights
+#> WHERE (arr_delay > 0.0 AND arr_delay < 20.0)
+```
+
+重要细节：
+
+- `|` 被转换为 SQL 的 `OR`，`&` 转换为 `AND`。
+- SQL 使用 `=` 比较值，而不是 `==。`
+- SQL 使用单引号 `'text'` 表示字符串，而不是双引号。双引号用于标注保留字。
+
+另外，SQL 中使用 `IN` 操作符来表示 `%in%`：
+
+```R
+flights |> 
+  filter(dest %in% c("IAH", "HOU")) |> 
+  show_query()
+#> <SQL>
+#> SELECT flights.*
+#> FROM flights
+#> WHERE (dest IN ('IAH', 'HOU'))
+```
+
+SQL 使用 `NULL` 表示缺失值，与 R 中的 `NA` 类似。但是，在聚合时 SQL 默认忽略 NULL 值，而 R 中必须显式设置 `na.rm = TRUE`。比如以下操作：
+
+```R
+flights |> 
+  group_by(dest) |> 
+  summarize(delay = mean(arr_delay))
+```
+
+这将给出一个警告，提醒 NULL 会自动被 SQL 聚合函数忽略。
+
+若想移除缺失值，可以使用：
+
+```R
+flights |> 
+  filter(!is.na(dep_delay)) |> 
+  show_query()
+#> <SQL>
+#> SELECT flights.*
+#> FROM flights
+#> WHERE (NOT((dep_delay IS NULL)))
+```
+
+虽然这行 WHERE 子句是正确的，但并不简洁，我们自己可以写成：
+
+```sql
+WHERE dep_delay IS NOT NULL
+```
+
+注意， 如果在 `summarize()` 后再对某变量进行 `filter()`，`dbplyr` 会生成 `HAVING` 子句而不是 `WHERE`。正如前文所示，这是 SQL 的执行流程，`WHERE` 会在 `SELECT` 和 `GROUP BY` 之前执行，而 `HAVING` 在之后。
+
+```R
+diamonds_db |> 
+  group_by(cut) |> 
+  summarize(n = n()) |> 
+  filter(n > 100) |> 
+  show_query()
+#> <SQL>
+#> SELECT cut, COUNT(*) AS n
+#> FROM diamonds
+#> GROUP BY cut
+#> HAVING (COUNT(*) > 100.0)
+```
+
+------
+
+### ORDER BY 子句
+
+排序操作使用的 `arrange()`函数会被翻译为 `ORDER BY`：
+
+```R
+flights |> 
+  arrange(year, month, day, desc(dep_delay)) |> 
+  show_query()
+#> <SQL>
+#> SELECT flights.*
+#> FROM flights
+#> ORDER BY "year", "month", "day", dep_delay DESC
+```
+
+> `desc()` 被翻译成 SQL 的 `DESC`。
+
+------
+
+### 子查询
+
+有时无法将dplyr管道转换为单个SELECT语句，此时需要使用子查询。子查询是指作为FROM子句数据源（而非常规表）的查询语句。
+
+dbplyr通常通过子查询来解决SQL的语法限制。例如：
+
+- **SELECT子句限制**：SELECT中的表达式不能引用刚创建的列。因此以下dplyr管道需分两步执行：内层查询计算`year1`，外层查询才能计算`year2`。
+
+```R
+flights |> 
+  mutate(
+    year1 = year + 1,
+    year2 = year1 + 1
+  ) |> 
+  show_query()
+#> <SQL>
+#> SELECT q01.*, year1 + 1.0 AS year2
+#> FROM (
+#>   SELECT flights.*, "year" + 1.0 AS year1
+#>   FROM flights
+#> ) q01
+```
+
+> 如果在SQL中直接尝试：
+>
+> ```sql
+> SELECT 
+> year + 1 AS year1,
+> year1 + 1 AS year2  # 会报错：Unknown column 'year1'
+> FROM flights
+> ```
+>
+> 错误原因：SQL引擎按子句顺序执行（FROM → WHERE → GROUP BY → HAVING → SELECT），SELECT中的列尚未生成时就被引用。
+
+- **WHERE子句限制**：过滤新创建的变量时同样需要子查询。
+
+```R
+flights |> 
+  mutate(year1 = year + 1) |> 
+  filter(year1 == 2014) |> 
+  show_query()
+#> <SQL>
+#> SELECT q01.*
+#> FROM (
+#>   SELECT flights.*, "year" + 1.0 AS year1
+#>   FROM flights
+#> ) q01
+#> WHERE (year1 = 2014.0)
+```
+
+------
+
+### 连接
+
+SQL的连接与dplyr非常相似。以下是一个简单示例：
+
+```R
+flights |> 
+  left_join(planes |> rename(year_built = year), join_by(tailnum)) |> 
+  show_query()
+#> <SQL>
+#> SELECT
+#>   flights.*,
+#>   planes."year" AS year_built,
+#>   "type",
+#>   manufacturer,
+#>   model,
+#>   engines,
+#>   seats,
+#>   speed,
+#>   engine
+#> FROM flights
+#> LEFT JOIN planes
+#>   ON (flights.tailnum = planes.tailnum)
+```
+
+此处需注意语法特性，SQL连接通过FROM子句的子句引入附加表，并使用`ON`定义表间关系。
+
+SQL的其他连接操作与dplyr的连接函数也基本相同：
+
+- **内连接**：
+
+  ```sql
+  SELECT flights.*, "type", manufacturer, model, engines, seats, speed
+  FROM flights
+  INNER JOIN planes ON (flights.tailnum = planes.tailnum)
+  ```
+
+- **右连接**：
+
+  ```sql
+  SELECT flights.*, "type", manufacturer, model, engines, seats, speed
+  FROM flights
+  RIGHT JOIN planes ON (flights.tailnum = planes.tailnum)
+  ```
+
+- **全连接**：
+
+  ```sql
+  SELECT flights.*, "type", manufacturer, model, engines, seats, speed
+  FROM flights
+  FULL JOIN planes ON (flights.tailnum = planes.tailnum)
+  ```
+
+------
+
+### 其他动词
+
+dbplyr还能转换更多操作。
+
+访问dbplyr官网可查看完整的支持函数列表：https://dbplyr.tidyverse.org/reference/
+
+
+
+
+
+## 函数转换机制
+
+至此我们已探讨了dplyr动词转换为查询子句的整体框架。现在让我们聚焦于单个列操作的R函数转换细节，例如在`summarize()`中使用`mean(x)`时，幕后到底发生了什么。
+
+为便于观察，创建两个辅助函数来展示生成的SQL：
+
+```R
+summarize_query <- function(df, ...) {
+  df |> 
+    summarize(...) |> 
+    show_query()
+}
+
+mutate_query <- function(df, ...) {
+  df |> 
+    mutate(..., .keep = "none") |> 
+    show_query()
+}
+```
+
+1. 基础聚合函数转换
+
+观察以下代码时会发现，像`mean()`这样的汇总函数转换相对简单，而`median()`等函数的转换则复杂得多。之所以存在这种复杂度差异，主要因为统计分析中常见的操作在数据库中并不常见。
+
+```R
+flights |> 
+  group_by(year, month, day) |>  
+  summarize_query(
+    mean = mean(arr_delay, na.rm = TRUE),
+    median = median(arr_delay, na.rm = TRUE)
+  )
+#> `summarise()` has grouped output by "year" and "month". You can override
+#> using the `.groups` argument.
+#> <SQL>
+#> SELECT
+#>   "year",
+#>   "month",
+#>   "day",
+#>   AVG(arr_delay) AS mean,
+#>   MEDIAN(arr_delay) AS median
+#> FROM flights
+#> GROUP BY "year", "month", "day"
+```
+
+2. 窗口函数转换
+
+当在`mutate()`中使用聚合函数时，它们会转换为**窗口函数**，通过在普通聚合函数后添加`OVER`子句实现：
+
+```R
+flights |> 
+  group_by(year, month, day) |>  
+  mutate_query(
+    mean = mean(arr_delay, na.rm = TRUE),
+  )
+#> <SQL>
+#> SELECT
+#>   "year",
+#>   "month",
+#>   "day",
+#>   AVG(arr_delay) OVER (PARTITION BY "year", "month", "day") AS mean
+#> FROM flights
+```
+
+> 窗口函数（Window Functions）是SQL中一种强大的分析工具，它能在不减少行数的情况下执行计算，同时保留原始数据的完整性。
+
+3. 前后值函数实现
+
+转换成窗口函数的对象还包括`lead()`和`lag()`等前瞻/回溯函数：
+
+```R
+flights |> 
+  group_by(dest) |>  
+  arrange(time_hour) |> 
+  mutate_query(
+    lead = lead(arr_delay),
+    lag = lag(arr_delay)
+  )
+#> <SQL>
+#> SELECT
+#>   dest,
+#>   LEAD(arr_delay, 1, NULL) OVER (PARTITION BY dest ORDER BY time_hour) AS lead,
+#>   LAG(arr_delay, 1, NULL) OVER (PARTITION BY dest ORDER BY time_hour) AS lag
+#> FROM flights
+#> ORDER BY time_hour
+```
+
+> 注意：
+>
+> - 必须使用`arrange()`排序，因为SQL表本身没有固有顺序。
+>
+> - 窗口函数的排序条件需要单独声明。
+
+4. 条件表达式转换
+
+`CASE WHEN`是转换`if_else()`和`case_when()`的核心结构：
+
+```R
+# if_else转换
+flights |> 
+  mutate_query(
+    description = if_else(arr_delay > 0, "delayed", "on-time")
+  )
+#> <SQL>
+#> SELECT CASE WHEN (arr_delay > 0.0) THEN 'delayed' WHEN NOT (arr_delay > 0.0) THEN 'on-time' END AS description
+#> FROM flights
+
+# case_when转换
+flights |> 
+  mutate_query(
+    description = 
+      case_when(
+        arr_delay < -5 ~ "early", 
+        arr_delay < 5 ~ "on-time",
+        arr_delay >= 5 ~ "late"
+      )
+  )
+#> <SQL>
+#> SELECT CASE
+#> WHEN (arr_delay < -5.0) THEN 'early'
+#> WHEN (arr_delay < 5.0) THEN 'on-time'
+#> WHEN (arr_delay >= 5.0) THEN 'late'
+#> END AS description
+#> FROM flights
+```
+
+5. 特殊函数转换
+
+对于没有直接SQL对应的R函数（如`cut()`），同样使用`CASE WHEN`实现：
+
+```R
+flights |> 
+  mutate_query(
+    description =  cut(
+      arr_delay, 
+      breaks = c(-Inf, -5, 5, Inf), 
+      labels = c("early", "on-time", "late")
+    )
+  )
+#> <SQL>
+#> SELECT CASE
+#> WHEN (arr_delay <= -5.0) THEN 'early'
+#> WHEN (arr_delay <= 5.0) THEN 'on-time'
+#> WHEN (arr_delay > 5.0) THEN 'late'
+#> END AS description
+#> FROM flights
+```
+
+dbplyr还支持转换：
+
+- 字符串处理函数
+- 日期时间函数
+
+虽然dbplyr的转换机制尚不完美，部分R函数仍未支持，但对最常用的函数已实现高质量的转换覆盖。
+

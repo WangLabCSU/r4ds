@@ -1,0 +1,567 @@
+---
+title: "网页抓取"
+format: html
+---
+
+## 引言
+
+网页抓取是从互联网页面中提取结构化数据的方法。部分网站会提供API接口（一组返回JSON格式数据的标准化HTTP请求），将其抓取后，便可以运用上一章介绍的技巧处理数据。
+
+本章主要使用rvest工具包。rvest属于tidyverse生态，但需要单独加载。
+
+```R
+library(tidyverse)
+library(rvest)
+```
+
+
+
+
+
+## 网络抓取的伦理与法律问题
+
+要探讨具体的抓取技术，就必须先明确网络抓取行为的合法性与伦理边界。
+
+首先，法律约束因地区而异。但有个基本原则：如果数据属于公开、非个人且事实性的内容，则通常风险较低。
+
+若涉及非公开数据、个人隐私信息，或以商业盈利为目的的抓取行为，建议咨询专业律师。无论何种情况，都应当合理控制抓取频率，避免对目标服务器造成过大负担。
+
+即使面对公开数据，涉及以下信息时仍需特别谨慎：
+
+- 姓名/邮箱/电话等直接标识符
+- 出生日期等间接标识符
+- 地理位置等敏感信息
+
+原则上不禁止抓取受版权保护内容，但需满足：
+
+- 用于研究/非商业目的
+- 仅抓取所需内容
+- 控制抓取规模
+
+
+
+
+
+## HTML基础
+
+首先了解HTML（超文本标记语言）的基本结构。典型的HTML文档示例如下：
+
+```html
+<html>
+<head>
+  <title>Page title</title>
+</head>
+<body>
+  <h1 id='first'>A heading</h1>
+  <p>Some text &amp; <b>some bold text.</b></p>
+  <img src='myimg.png' width='100' height='100'>
+</body>
+```
+
+HTML采用层级化的元素结构，每个元素包含：
+
+- 开始标签（如`<tag>`）
+- 可选属性（如`id='first'`）
+- 结束标签（如`</tag>`）
+- 内容（开始与结束标签之间的部分）
+
+特殊字符需转义表示：
+
+- `<` 写成 `&lt`
+- `>` 写成 `&gt`
+- `&` 写成 `&amp`
+
+------
+
+核心元素类型如下：
+
+1. **文档结构元素**
+   - `<html>`：根元素
+   - `<head>`：元数据（如页面标题）
+   - `<body>`：可见内容
+2. **区块元素**（定义页面结构）
+   - `<h1>`：一级标题
+   - `<p>`：段落
+   - `<section>`：内容区块
+   - `<ol>`：有序列表
+3. **行内元素**（文本格式化）
+   - `<b>`：加粗
+   - `<i>`：斜体
+   - `<a>`：超链接
+
+比如下面这个例子：
+
+```html
+<p>
+  Hi! My <b>name</b> is Jia.
+</p>
+```
+
+- `<p>`元素包含一个子元素`<b>`
+- `<b>`元素包含文本内容“name”
+
+------
+
+标签可包含命名属性，格式为`属性名="值"`：
+
+关键属性如下：
+
+- `id`：唯一标识符
+- `class`：样式类名
+- `href`（`<a>`标签）：链接地址
+- `src`（`<img>`标签）：图片资源路径
+
+这些属性常与CSS配合控制页面的显示样式，也是数据抓取时的重要定位依据。遇到不熟悉的标签时，可查阅MDN Web Docs等权威文档。
+
+
+
+
+
+## 数据提取
+
+要开始抓取数据，首先需要获取目标页面的URL（通常可以从浏览器中复制）。接着，使用`read_html()`函数将页面的HTML内容读入R。该函数返回的是`xml_document`对象：
+
+```R
+html <- read_html("http://rvest.tidyverse.org/")
+html
+#> {html_document}
+#> <html lang="en">
+#> [1] <head>\n<meta http-equiv="Content-Type" content="text/html; charset=UT ...
+#> [2] <body>\n    <a href="#container" class="visually-hidden-focusable">Ski ...
+```
+
+函数`minimal_html()`支持内联编写HTML，向`xml_document`对象中添加新成分：
+
+```R
+html <- minimal_html("
+  <p>This is a paragraph</p>
+  <ul>
+    <li>This is a bulleted list</li>
+  </ul>
+")
+
+html
+#> {html_document}
+#> <html>
+#> [1] <head>\n<meta http-equiv="Content-Type" content="text/html; charset=UT ...
+#> [2] <body>\n<p>This is a paragraph</p>\n  <ul>\n<li>This is a bulleted lis ...
+```
+
+- `[1]`是`<head>`部分，是元数据。
+- `[2]`是`<body>`部分，是自定义的部分。
+- `\n`表示换行符，显示原始HTML结构
+
+这样一来便将HTML加载到了R，下一步是提取目标数据。
+
+------
+
+CSS（层叠样式表）是一种定义HTML文档视觉样式的工具，其选择器语法可用来定位页面元素。简单来说，就是用关键词在网页上找东西。
+
+掌握以下三种选择器即可应对多数场景：
+
+- `p` 定位所有的**段落**（`<p>`标签）。
+- `.title` 定位所有 **class="title"** 的元素（比如高亮标题）。
+- `#title` 定位 **id="title"** 的元素（即整个网页唯一的大标题）。
+
+为了说明选择器的操作，在此创建一个html对象为例。
+
+```R
+html <- minimal_html("
+  <h1>This is a heading</h1>
+  <p id='first'>This is a paragraph</p>
+  <p class='important'>This is an important paragraph</p>
+")
+```
+
+使用`html_elements()`查找匹配选择器的所有元素：
+
+```R
+html |> html_elements("p")
+#> {xml_nodeset (2)}
+#> [1] <p id="first">This is a paragraph</p>
+#> [2] <p class="important">This is an important paragraph</p>
+html |> html_elements(".important")
+#> {xml_nodeset (1)}
+#> [1] <p class="important">This is an important paragraph</p>
+html |> html_elements("#first")
+#> {xml_nodeset (1)}
+#> [1] <p id="first">This is a paragraph</p>
+```
+
+与之相对，`html_element()`函数（注意相对上面那个少了字母s）只输出**第一个**匹配项：
+
+```R
+html |> html_element("p")
+#> {html_node}
+#> <p id="first">
+```
+
+当选择器未能成功匹配段落中的元素时，`html_elements()`返回长度为0的向量，而`html_element()`返回缺失值：
+
+```R
+html |> html_elements("b")
+#> {xml_nodeset (0)}
+html |> html_element("b")
+#> {xml_missing}
+#> <NA>
+```
+
+通常需组合使用`html_elements()`和`html_element()`，先用前者大致定位观测单位，再用后者提取指定的元素。比如以下示例包含《星球大战》中四个角色信息：
+
+```R
+html <- minimal_html("
+  <ul>
+    <li><b>C-3PO</b> is a <i>droid</i> that weighs <span class='weight'>167 kg</span></li>
+    <li><b>R4-P17</b> is a <i>droid</i></li>
+    <li><b>R2-D2</b> is a <i>droid</i> that weighs <span class='weight'>96 kg</span></li>
+    <li><b>Yoda</b> weighs <span class='weight'>66 kg</span></li>
+  </ul>
+")
+```
+
+用`html_elements()`生成每个角色对应的向量：
+
+```R
+characters <- html |> html_elements("li")
+characters
+#> {xml_nodeset (4)}
+#> [1] <li>\n<b>C-3PO</b> is a <i>droid</i> that weighs <span class="weight"> ...
+#> [2] <li>\n<b>R4-P17</b> is a <i>droid</i>\n</li>
+#> [3] <li>\n<b>R2-D2</b> is a <i>droid</i> that weighs <span class="weight"> ...
+#> [4] <li>\n<b>Yoda</b> weighs <span class="weight">66 kg</span>\n</li>
+```
+
+提取角色名称时便可使用`html_element()`：
+
+```R
+characters |> html_element("b")
+#> {xml_nodeset (4)}
+#> [1] <b>C-3PO</b>
+#> [2] <b>R4-P17</b>
+#> [3] <b>R2-D2</b>
+#> [4] <b>Yoda</b>
+```
+
+`html_element()`与`html_elements()`处理空值时的差异在提取体重时尤为关键。即使某些角色无体重信息，`html_element()`仍会为每个角色返回一个缺失值填充：
+
+```R
+characters |> html_element(".weight")
+#> {xml_nodeset (4)}
+#> [1] <span class="weight">167 kg</span>
+#> [2] NA
+#> [3] <span class="weight">96 kg</span>
+#> [4] <span class="weight">66 kg</span>
+```
+
+而`html_elements()`会返回实际的体重`<span>`标签，导致角色与体重对应关系丢失：
+
+```R
+characters |> html_elements(".weight")
+#> {xml_nodeset (3)}
+#> [1] <span class="weight">167 kg</span>
+#> [2] <span class="weight">96 kg</span>
+#> [3] <span class="weight">66 kg</span>
+```
+
+------
+
+`html_text2()`可提取元素的纯文本内容：
+
+```R
+characters |> 
+  html_element("b") |> 
+  html_text2()
+#> [1] "C-3PO"  "R4-P17" "R2-D2"  "Yoda"
+
+characters |> 
+  html_element(".weight") |> 
+  html_text2()
+#> [1] "167 kg" NA       "96 kg"  "66 kg"
+```
+
+> 注意转义字符会被自动处理掉。
+
+`html_attr()`用于提取属性值：
+
+```R
+html <- minimal_html("
+  <p><a href='https://en.wikipedia.org/wiki/Cat'>cats</a></p>
+  <p><a href='https://en.wikipedia.org/wiki/Dog'>dogs</a></p>
+")
+
+html |> 
+  html_elements("p") |> 
+  html_element("a") |> 
+  html_attr("href")
+#> [1] "https://en.wikipedia.org/wiki/Cat" "https://en.wikipedia.org/wiki/Dog"
+```
+
+> `html_attr()`返回的是字符串，若提取数值或日期则需后续处理。
+
+------
+
+若数据已存储在HTML表格中，则可直接读取。表格通常具有行列结构，可直接复制到Excel等工具中。
+
+HTML表格由四个主要元素构成：`<table>`、`<tr>`（行）、`<th>`（表头）、`<td>`（单元格）。比如下面是一个两列三行的表格：
+
+```R
+html <- minimal_html("
+  <table class='mytable'>
+    <tr><th>x</th>   <th>y</th></tr>
+    <tr><td>1.5</td> <td>2.7</td></tr>
+    <tr><td>4.9</td> <td>1.3</td></tr>
+    <tr><td>7.2</td> <td>8.1</td></tr>
+  </table>
+")
+```
+
+`html_table()`函数可输出表格对应的R数据框形式。通过`html_element()`指定目标表格：
+
+```R
+html |> 
+  html_element(".mytable") |> 
+  html_table()
+#> # A tibble: 3 × 2
+#>       x     y
+#>   <dbl> <dbl>
+#> 1   1.5   2.7
+#> 2   4.9   1.3
+#> 3   7.2   8.1
+```
+
+注意`x`和`y`的元素已自动转换为数值类型。若自动转换有误，可设置`convert = FALSE`关闭该功能并手动处理。
+
+
+
+
+
+## 寻找合适的选择器
+
+CSS 选择器用于精准定位 HTML 中的目标数据，但由于网页结构复杂，找到合适的选择器往往需要反复调试。
+
+选择器的两大核心要素：
+
+- 特异性：只选中目标元素，避免无关内容。
+- 敏感性：确保选中所有需要的数据。
+
+推荐以下两个工具进行辅助：
+
+1. SelectorGadget，通过点击示例自动生成 CSS 选择器（支持正反例标记）。
+
+2. 浏览器开发者工具，可在网页使用**右键 → 检查（Inspect）**查看 HTML 结构，分析元素属性（重点关注 `class` 和 `id`）。
+
+
+
+
+
+## 应用案例
+
+下面通过两个实际案例来总结网页抓取技术。不过网站结构可能随时变化，以下代码难以实际复现。
+
+### 星球大战数据
+
+rvest包内置了一个简单的示例`vignette("starwars")`：
+
+其页面结构如下所示：
+
+```html
+<section>
+  <h2 data-id="1">The Phantom Menace</h2>
+  <p>Released: 1999-05-19</p>
+  <p>Director: <span class="director">George Lucas</span></p>
+  
+  <div class="crawl">
+    <p>...</p>
+    <p>...</p>
+    <p>...</p>
+  </div>
+</section>
+```
+
+我们的目标是将这些数据转换为7行的数据框，变量包括title、year、director、intro。首先读取HTML并提取所有section元素：
+
+```R
+url <- "https://rvest.tidyverse.org/articles/starwars.html"
+html <- read_html(url)
+
+section <- html |> html_elements("section")
+section
+#> {xml_nodeset (7)}
+#> [1] <section><h2 data-id="1">\nThe Phantom Menace\n</h2>\n<p>\nReleased: 1 ...
+#> [2] <section><h2 data-id="2">\nAttack of the Clones\n</h2>\n<p>\nReleased: ...
+#> [3] <section><h2 data-id="3">\nRevenge of the Sith\n</h2>\n<p>\nReleased:  ...
+#> [4] <section><h2 data-id="4">\nA New Hope\n</h2>\n<p>\nReleased: 1977-05-2 ...
+#> [5] <section><h2 data-id="5">\nThe Empire Strikes Back\n</h2>\n<p>\nReleas ...
+#> [6] <section><h2 data-id="6">\nReturn of the Jedi\n</h2>\n<p>\nReleased: 1 ...
+#> [7] <section><h2 data-id="7">\nThe Force Awakens\n</h2>\n<p>\nReleased: 20 ...
+```
+
+接下来即可提取单个元素，关键是要找到正确的选择器：
+
+```R
+section |> html_element("h2") |> html_text2()
+#> [1] "The Phantom Menace"      "Attack of the Clones"   
+#> [3] "Revenge of the Sith"     "A New Hope"             
+#> [5] "The Empire Strikes Back" "Return of the Jedi"     
+#> [7] "The Force Awakens"
+
+section |> html_element(".director") |> html_text2()
+#> [1] "George Lucas"     "George Lucas"     "George Lucas"    
+#> [4] "George Lucas"     "Irvin Kershner"   "Richard Marquand"
+#> [7] "J. J. Abrams"
+```
+
+最后将所有结果整合成一个数据框：
+
+```R
+tibble(
+  title = section |> 
+    html_element("h2") |> 
+    html_text2(),
+  released = section |> 
+    html_element("p") |> 
+    html_text2() |> 
+    str_remove("Released: ") |> 
+    parse_date(),
+  director = section |> 
+    html_element(".director") |> 
+    html_text2(),
+  intro = section |> 
+    html_element(".crawl") |> 
+    html_text2()
+)
+#> # A tibble: 7 × 4
+#>   title                   released   director         intro                  
+#>   <chr>                   <date>     <chr>            <chr>                  
+#> 1 The Phantom Menace      1999-05-19 George Lucas     "Turmoil has engulfed …
+#> 2 Attack of the Clones    2002-05-16 George Lucas     "There is unrest in th…
+#> 3 Revenge of the Sith     2005-05-19 George Lucas     "War! The Republic is …
+#> 4 A New Hope              1977-05-25 George Lucas     "It is a period of civ…
+#> 5 The Empire Strikes Back 1980-05-17 Irvin Kershner   "It is a dark time for…
+#> 6 Return of the Jedi      1983-05-25 Richard Marquand "Luke Skywalker has re…
+#> # ℹ 1 more row
+```
+
+> - 使用`str_remove()`清理多余文本
+> - 使用`parse_date()`转换日期格式
+
+
+
+## IMDb 电影榜单
+
+第二个案例抓取IMDb的电影top榜单，展示如何处理复杂数据。
+
+数据有明显的表格结构，因此可以先尝试`html_table()`：
+
+```R
+url <- "https://web.archive.org/web/20220201012049/https://www.imdb.com/chart/top/"
+html <- read_html(url)
+
+table <- html |> 
+  html_element("table") |> 
+  html_table()
+
+table
+#> # A tibble: 250 × 5
+#>   ``    `Rank & Title`                    `IMDb Rating` `Your Rating`   ``   
+#>   <lgl> <chr>                                     <dbl> <chr>           <lgl>
+#> 1 NA    "1.\n      The Shawshank Redempt…           9.2 "12345678910\n… NA   
+#> 2 NA    "2.\n      The Godfather\n      …           9.1 "12345678910\n… NA   
+#> 3 NA    "3.\n      The Godfather: Part I…           9   "12345678910\n… NA   
+#> 4 NA    "4.\n      The Dark Knight\n    …           9   "12345678910\n… NA   
+#> 5 NA    "5.\n      12 Angry Men\n       …           8.9 "12345678910\n… NA   
+#> 6 NA    "6.\n      Schindler's List\n   …           8.9 "12345678910\n… NA   
+#> # ℹ 244 more rows
+```
+
+虽然包含一些空列，但总体上成功捕获了表格信息。接下来初步处理数据：
+
+```R
+ratings <- table |>
+  select(
+    rank_title_year = `Rank & Title`,
+    rating = `IMDb Rating`
+  ) |> 
+  mutate(
+    rank_title_year = str_replace_all(rank_title_year, "\n +", " ")
+  ) |> 
+  separate_wider_regex(
+    rank_title_year,
+    patterns = c(
+      rank = "\\d+", "\\. ",
+      title = ".+", " +\\(",
+      year = "\\d+", "\\)"
+    )
+  )
+
+ratings
+#> # A tibble: 250 × 4
+#>   rank  title                    year  rating
+#>   <chr> <chr>                    <chr>  <dbl>
+#> 1 1     The Shawshank Redemption 1994     9.2
+#> 2 2     The Godfather            1972     9.1
+#> 3 3     The Godfather: Part II   1974     9  
+#> 4 4     The Dark Knight          2008     9  
+#> 5 5     12 Angry Men             1957     8.9
+#> 6 6     Schindler's List         1993     8.9
+#> # ℹ 244 more rows
+```
+
+> `separate_wider_regex()`（第15章介绍过）将标题、年份和排名拆分到独立变量中。
+
+查看原始HTML还能发现更多数据：
+
+```R
+html |> 
+  html_elements("td strong") |> 
+  head() |> 
+  html_attr("title")
+#> [1] "9.2 based on 2,536,415 user ratings"
+#> [2] "9.1 based on 1,745,675 user ratings"
+#> [3] "9.0 based on 1,211,032 user ratings"
+#> [4] "9.0 based on 2,486,931 user ratings"
+#> [5] "8.9 based on 749,563 user ratings"  
+#> [6] "8.9 based on 1,295,705 user ratings"
+```
+
+不妨将这些数据与表格数据结合：
+
+```R
+ratings |>
+  mutate(
+    rating_n = html |> html_elements("td strong") |> html_attr("title")
+  ) |> 
+  separate_wider_regex(
+    rating_n,
+    patterns = c(
+      "[0-9.]+ based on ",
+      number = "[0-9,]+",
+      " user ratings"
+    )
+  ) |> 
+  mutate(
+    number = parse_number(number)
+  )
+#> # A tibble: 250 × 5
+#>   rank  title                    year  rating  number
+#>   <chr> <chr>                    <chr>  <dbl>   <dbl>
+#> 1 1     The Shawshank Redemption 1994     9.2 2536415
+#> 2 2     The Godfather            1972     9.1 1745675
+#> 3 3     The Godfather: Part II   1974     9   1211032
+#> 4 4     The Dark Knight          2008     9   2486931
+#> 5 5     12 Angry Men             1957     8.9  749563
+#> 6 6     Schindler's List         1993     8.9 1295705
+#> # ℹ 244 more rows
+```
+
+
+
+
+
+## 动态网页
+
+到目前为止，本章讨论了`html_elements()`能返回浏览器所见内容的网页，介绍了解析并处理信息的过程。
+
+然而，有时我们会发现`html_elements()`相关函数返回的内容与浏览器中看到的完全不同。这是因为尝试抓取的网站是通过JavaScript动态来生成页面内容的。目前这种形式无法通过rvest包进行解析，因为rvest包只下载原始HTML而不会执行任何JavaScript代码。
+
+本书作者目前正在加紧开发rvest以实现抓取动态网页，欲知详情可访问rvest官网。

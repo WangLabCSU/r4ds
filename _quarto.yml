@@ -27,21 +27,21 @@ book:
     - chapters/ch13_numbers.qmd
     - chapters/ch14_strings.qmd
     - chapters/ch15_regular_expressions.qmd
-    # - chapters/ch16_factors.qmd
-    # - chapters/ch17_dates_and_times.qmd
-    # - chapters/ch18_missing_values.qmd
-    # - chapters/ch19_joins.qmd
-    # - chapters/ch20_spreadsheets.qmd
-    # - chapters/ch21_databases.qmd
-    # - chapters/ch22_arrow.qmd
-    # - chapters/ch23_hierarchical_data.qmd
-    # - chapters/ch24_web_scraping.qmd
-    # - chapters/ch25_functions.qmd
-    # - chapters/ch26_iteration.qmd
-    # - chapters/ch27_field_guide_base_R.qmd
-    # - chapters/ch28_quarto.qmd
-    # - chapters/ch29_quarto_formats.qmd
-    # - references.qmd
+    - chapters/ch16_factors.qmd
+    - chapters/ch17_dates_and_times.qmd
+    - chapters/ch18_missing_values.qmd
+    - chapters/ch19_joins.qmd
+    - chapters/ch20_spreadsheets.qmd
+    - chapters/ch21_databases.qmd
+    - chapters/ch22_arrow.qmd
+    - chapters/ch23_hierarchical_data.qmd
+    - chapters/ch24_web_scraping.qmd
+    - chapters/ch25_functions.qmd
+    - chapters/ch26_iteration.qmd
+    - chapters/ch27_field_guide_base_R.qmd
+    - chapters/ch28_quarto.qmd
+    - chapters/ch29_quarto_formats.qmd
+    - afterword.qmd
 
 bibliography: references.bib
 
