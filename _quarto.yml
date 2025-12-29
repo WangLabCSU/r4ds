@@ -12,11 +12,11 @@ book:
   
   comments:
     giscus:
-      repo: "WangLabCSU/r4ds"
-      repo-id: "R_kgDOQuKn1Q"
+      repo: SunPast/r4ds
+      repo-id: "R_kgDOQfPK2Q"
       category: "Announcements"
       category-id: "DIC_kwDOQuKn1c4C0VwN"
-      mapping: title
+      mapping: pathname
       reactions-enabled: true
       input-position: top
       theme: preferred_color_scheme
@@ -69,24 +69,5 @@ format:
       - brand
     toc: true
     toc-depth: 2
-    css: |
-      #quarto-margin-sidebar {
-        z-index: 100;
-      }
-      .giscus {
-        position: relative;
-        z-index: 1000;
-        margin-top: 3rem;
-        padding-top: 2rem;
-        border-top: 1px solid #eaeaea;
-      }
-      @media (prefers-color-scheme: dark) {
-        .giscus {
-          border-top-color: #333;
-        }
-      }
-      .cell {
-        margin-bottom: 2rem;
-      }
 
 editor: visual
