@@ -9,6 +9,22 @@ book:
   repo-url: https://github.com/SunPast/r4ds
   repo-actions: [edit, issue, source]
   sharing: [twitter, facebook]
+  
+  comments:
+    giscus:
+      repo: "WangLabCSU/r4ds"
+      repo-id: "R_kgDOQuKn1Q"
+      category: "Q&A"
+      category-id: "DIC_kwDOQuKn1c4C0VwN"
+      mapping: title
+      strict: 0
+      reactions-enabled: 1
+      emit-metadata: 0
+      input-position: top
+      theme: preferred_color_scheme
+      lang: zh-CN
+      loading: lazy
+  
   chapters:
     - index.qmd
     - intro.qmd
@@ -55,9 +71,19 @@ format:
       - brand
     toc: true
     toc-depth: 2
-
-comments:
-  hypothesis: true
+    css: |
+      .giscus {
+        margin-top: 3rem;
+        padding-top: 2rem;
+        border-top: 1px solid #eaeaea;
+      }
+      @media (prefers-color-scheme: dark) {
+        .giscus {
+          border-top-color: #333;
+        }
+      }
+      .cell {
+        margin-bottom: 2rem;
+      }
 
 editor: visual
-
