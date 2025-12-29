@@ -70,6 +70,9 @@ format:
     toc: true
     toc-depth: 2
     css: |
+      #quarto-margin-sidebar {
+        z-index: 100;
+      }
       .giscus {
         position: relative;
         z-index: 1000;
